@@ -47,6 +47,8 @@ Unreloader.record_dependency(File.join(wd, 'views', 'components'), File.join(wd,
 
 app = dev ? Unreloader : App
 
+use Rack::Protection::HostAuthorization, permitted_hosts: ["abidepurdue.com", "://abidepurdue.com"]
+
 # Mounted under Abid.root_path when one is set. Rack::URLMap moves the prefix
 # into SCRIPT_NAME, so every route stays `get '/board'`, every `redirect
 # to(...)` and `url(...)` comes out prefixed, and a request outside the prefix
