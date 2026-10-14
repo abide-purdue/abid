@@ -50,16 +50,47 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Validate deployment secrets
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_KEY: ${{ secrets.SSH_KEY }}
+          SSH_PORT: ${{ secrets.SSH_PORT || '22' }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+        run: |
+          missing=""
+          for name in SSH_HOST SSH_USER SSH_KEY DEPLOY_PATH; do
+            if [ -z "${!name:-}" ]; then
+              missing="$missing $name"
+            fi
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::Missing required repository or 'production' environment secret(s):$missing"
+            echo "Add them under Settings -> Secrets and variables -> Actions. See DEPLOY.md."
+            exit 1
+          fi
+          echo "All required deployment secrets are present (SSH_PORT=$SSH_PORT)."
+
       - name: Set up SSH
         env:
           SSH_KEY: ${{ secrets.SSH_KEY }}
           SSH_HOST: ${{ secrets.SSH_HOST }}
           SSH_PORT: ${{ secrets.SSH_PORT || '22' }}
         run: |
+          set -euo pipefail
           mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
           printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
-          ssh-keyscan -p "$SSH_PORT" -H "$SSH_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+
+          # Seed known_hosts so the first ssh/scp does not trip on an unknown
+          # host. Best-effort: if the scan fails we still attempt the deploy,
+          # which surfaces a clearer connection error than a bare exit code 1.
+          if ! ssh-keyscan -p "$SSH_PORT" -H "$SSH_HOST" >> ~/.ssh/known_hosts 2>keyscan.err; then
+            echo "::warning::ssh-keyscan could not reach $SSH_HOST:$SSH_PORT; relying on StrictHostKeyChecking=accept-new"
+            cat keyscan.err
+          fi
+          rm -f keyscan.err
 
       - name: Copy compose file to server
         env:
