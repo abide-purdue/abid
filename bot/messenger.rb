@@ -121,6 +121,7 @@ class Messenger < Bot
       bot.register_application_command(:say, 'have abide bot say something', server_id: abide.discord_id) do |command|
         command.string :message, 'The message to send', required: true
         command.channel :channel, 'The destination channel', required: true
+        command.string :reply_to, 'Optional message ID to reply to', required: false
       end
       bot.register_application_command(:login, 'send a login code', server_id: abide.discord_id)
       bot.register_application_command(:'toggle-sniping', 'opt out of being sniped, or back in', server_id: abide.discord_id)
@@ -128,6 +129,7 @@ class Messenger < Bot
       bot.register_application_command(:say, 'have abide bot say something') do |command|
         command.string :message, 'The message to send', required: true
         command.channel :channel, 'The destination channel', required: true
+        command.string :reply_to, 'Optional message ID to reply to', required: false
       end
       bot.register_application_command(:login, 'send a login code')
       bot.register_application_command(:'toggle-sniping', 'opt out of being sniped, or back in')
@@ -147,9 +149,10 @@ class Messenger < Bot
     bot.application_command(:say) do |event|
       message = event.options[:message] || event.options['message']
       channel_id = event.options[:channel] || event.options['channel']
+      reply_to = event.options[:reply_to] || event.options['reply_to']
 
       return event.respond('You are not able to do that!', ephemeral: true) unless user.leader
-      bot.send_message(channel_id, message)
+      bot.send_message(channel_id, message, false, nil, nil, nil, reply_to)
       event.respond "Message #{message} sent to channel #{channel_id}", ephemeral: true
     end
 
