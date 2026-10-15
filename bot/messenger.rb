@@ -151,14 +151,23 @@ class Messenger < Bot
       channel_id = event.options[:channel] || event.options['channel']
       reply_to = event.options[:reply_to] || event.options['reply_to']
 
-      return event.respond('You are not able to do that!', ephemeral: true) unless user.leader
-      bot.send_message(channel_id, message, false, nil, nil, nil, reply_to)
-      event.respond "Message #{message} sent to channel #{channel_id}", ephemeral: true
+      sender = User.find_by(discord_id: event.user.id)
+
+      return event.respond('You are not able to do that!', ephemeral: true) unless sender&.leader
+
+      if reply_to
+        message_reference = { message_id: reply_to.to_i, channel_id: channel_id.to_i }
+      else
+        message_reference = nil
+      end
+
+      bot.send_message(channel_id, message, false, nil, nil, nil, message_reference)
+      event.respond content: "Message \"#{message}\" sent to channel <\##{channel_id}>", ephemeral: true
     end
 
     bot.application_command(:login) do |event|
       user = User.find_by(discord_id: event.user.id)
-      return event.respond('You are not able to do that!', ephemeral: true) unless user.leader
+      return event.respond('You are not able to do that!', ephemeral: true) unless user&.leader
       handle_login_code(user)
       event.respond content: 'Your login code has been sent', ephemeral: true
     end
