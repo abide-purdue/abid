@@ -1,6 +1,3 @@
-#ignore unused workflows
-/.github
-
 #ignore installed packages
 /node_modules
 
