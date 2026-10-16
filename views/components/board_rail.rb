@@ -63,15 +63,19 @@ class Components::BoardRail < Phlex::HTML
       end
 
       action_form("rides/#{ride.id}", method: 'patch', class: 'flex flex-col gap-3.5') do
-        labeled('Full name') { text_field('name', ride.user&.name) }
-        labeled('Phone') { text_field('phone', ride.user&.phone, mono: true, placeholder: '(000) 000-0000') }
-        labeled(ride.driver? ? 'Starts from' : 'Pickup spot') do
-          text_field('pickup_address', ride.address, placeholder: 'Street address or landmark')
-        end
+        if ride.guest?
+          guest_fields(ride)
+        else
+          labeled('Full name') { text_field('name', ride.user&.name) }
+          labeled('Phone') { text_field('phone', ride.user&.phone, mono: true, placeholder: '(000) 000-0000') }
+          labeled(ride.driver? ? 'Starts from' : 'Pickup spot') do
+            text_field('pickup_address', ride.address, placeholder: 'Street address or landmark')
+          end
 
-        div(class: 'flex gap-2.5') do
-          div(class: 'flex-1') { labeled('Riding or driving') { role_select(ride) } }
-          div(class: 'w-24') { labeled('Seats') { seats_field(ride) } } if ride.driver?
+          div(class: 'flex gap-2.5') do
+            div(class: 'flex-1') { labeled('Riding or driving') { role_select(ride) } }
+            div(class: 'w-24') { labeled('Seats') { seats_field(ride) } } if ride.driver?
+          end
         end
 
         div(class: 'flex gap-2.5') do
@@ -201,6 +205,7 @@ class Components::BoardRail < Phlex::HTML
       add_drivers_button if @leader
       roster_section('Riders', @board.rider_rides) { |r| r.zone_short }
       add_person if @leader
+      add_guest if @leader
     end
   end
 
@@ -233,6 +238,47 @@ class Components::BoardRail < Phlex::HTML
     ) do
       span(class: "flex-1 text-[12.5px] capitalize #{ride.driver? ? 'font-semibold' : 'font-medium'}") { ride.display_name }
       span(class: 'board-meta') { meta.to_s }
+    end
+  end
+
+  # A plus-one has no account: name, who they came with, and a pickup only if
+  # it differs from the host's. The box holds just their own override, so
+  # saving the form never copies the host's address onto them and severs the
+  # "same pickup" link.
+  def guest_fields(ride)
+    labeled('Name') { text_field('name', ride.guest_name) }
+    host = ride.host_ride
+    span(class: 'text-[12px] text-ink/65') do
+      if host
+        "Plus-one of #{host.display_name} — not in the Discord. Rides in their car; " \
+          'moves when they move.'
+      else
+        'Plus-one — whoever brought them is no longer on this board, so they are seated on their own.'
+      end
+    end
+    labeled('Pickup spot') do
+      text_field('pickup_address', ride.pickup_address,
+                 placeholder: host ? "Same as #{host.display_name}" : 'Street address or landmark')
+    end
+  end
+
+  # Someone not in the Discord (issue #22), linked to whoever brought them.
+  def add_guest
+    hosts = @board.rides.select { |r| r.active? && !r.guest? }.sort_by { |r| r.display_name.downcase }
+    return if hosts.empty?
+
+    div(class: 'flex flex-col gap-2.5 p-3 bg-surface-sunk border border-line rounded-[9px]') do
+      span(class: 'board-label') { 'Add a plus-one' }
+      span(class: 'text-[11.5px] text-ink/60') { 'Not in the Discord? They ride in the same car as whoever brought them.' }
+      action_form('guests', class: 'flex flex-col gap-2.5') do
+        input(type: 'text', name: 'name', required: true, placeholder: 'Their name',
+              class: 'board-input w-full text-[12.5px]')
+        select(name: 'host_ride_id', required: true, class: 'board-input w-full text-[12.5px]') do
+          option(value: '') { 'Coming with…' }
+          hosts.each { |h| option(value: h.id) { "#{h.display_name}#{' (driving)' if h.driver?}" } }
+        end
+        button(type: 'submit', class: 'board-btn w-full') { 'Add plus-one' }
+      end
     end
   end
 

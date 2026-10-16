@@ -72,6 +72,7 @@ class RoutePlanner
     return meeting_stops if @car.ride.meet_at_pickup
 
     @car.passengers
+        .reject(&:riding_from_the_start?)
         .sort_by { |p| [p.pickup_position || 1 << 30, Location::ZONES.index(p.zone.to_s) || 99, p.display_name.to_s.downcase] }
         .map do |passenger|
           Stop.new(

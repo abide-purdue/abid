@@ -152,6 +152,7 @@ class Components::BoardCar < Phlex::HTML
         span(class: 'font-medium text-[12.5px] capitalize flex items-center gap-1.5') do
           plain passenger.display_name
           elsewhere_badge(passenger)
+          guest_badge(passenger)
         end
         if passenger.address.present?
           span(class: 'text-[10.5px] text-ink/70 whitespace-nowrap overflow-hidden text-ellipsis') { passenger.address }

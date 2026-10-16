@@ -670,6 +670,16 @@ class App < Sinatra::Base
     end
   end
 
+  # Someone who is not in the Discord, riding with whoever brought them.
+  post '/board/:event_id/guests' do
+    halt 422, 'A plus-one needs a name' if params[:name].to_s.strip.empty?
+    halt 422, 'Pick who they are coming with' if params[:host_ride_id].blank?
+
+    with_board do |event, _history|
+      RideDetails.create_guest(event, host_ride_id: params[:host_ride_id], name: params[:name])
+    end
+  end
+
   # Seats everyone who drives, in one press.
   #
   # Nothing ever created a driver: reactions arrive as riders because the emoji

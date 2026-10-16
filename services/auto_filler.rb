@@ -15,13 +15,15 @@ class AutoFiller
     seated = 0
     Ride.transaction do
       unassigned.each do |rider|
-        car = best_car_for(rider)
+        need = party(rider)
+        car = best_car_for(rider, need)
         next if car.nil?
 
+        # Ride#carry_guests brings any plus-ones into the same car.
         rider.update!(driver_ride_id: car.id, status: 'assigned')
-        load[car.id] += 1
+        load[car.id] += need
         seated_user_ids[car.id] << rider.user_id
-        seated += 1
+        seated += need
       end
     end
     seated
@@ -39,9 +41,21 @@ class AutoFiller
     @drivers ||= rides.select { |r| r.driver? && r.active? }
   end
 
+  # Plus-ones riding with a host are not seated on their own; they follow.
   def unassigned
-    @unassigned ||= rides.select { |r| r.rider? && r.active? && r.driver_ride_id.nil? }
+    @unassigned ||= rides.select { |r| r.rider? && r.active? && r.driver_ride_id.nil? && !follower?(r) }
                          .sort_by { |r| r.display_name.downcase }
+  end
+
+  def follower?(ride)
+    return false unless ride.guest? && ride.host_ride_id
+
+    host = rides.find { |r| r.id == ride.host_ride_id }
+    host.present? && host.active?
+  end
+
+  def party(ride)
+    1 + rides.count { |g| g.host_ride_id == ride.id && g.guest? && g.active? }
   end
 
   # Mutated as we go, so a car filled during this run is seen as full by the
@@ -56,8 +70,8 @@ class AutoFiller
     end
   end
 
-  def best_car_for(rider)
-    candidates = drivers.reject { |d| load[d.id] >= d.capacity }
+  def best_car_for(rider, need = 1)
+    candidates = drivers.reject { |d| load[d.id] + need > d.capacity }
     return nil if candidates.empty?
 
     candidates.min_by { |d| sort_key(d, rider) }

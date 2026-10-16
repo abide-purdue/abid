@@ -118,13 +118,13 @@ class DispatchReadiness
     return if map.empty?
 
     lines = @board.rides.select(&:active?).filter_map do |ride|
-      labels = map[ride.user_id]
+      labels = ride.user_id && map[ride.user_id]
       "#{ride.display_name} is #{labels.join(', and ')}" if labels
     end.uniq
 
     Finding.new(key: :double_booked, severity: :warn,
                 message: lines.to_sentence,
-                ride_ids: @board.rides.select { |r| map.key?(r.user_id) }.map(&:id))
+                ride_ids: @board.rides.select { |r| r.user_id && map.key?(r.user_id) }.map(&:id))
   end
 
 end

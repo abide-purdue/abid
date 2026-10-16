@@ -115,10 +115,15 @@ module Rides
           [ride, meters] if meters <= WALK_METERS
         end
 
-        candidates.sort_by { |_, meters| meters }.first(free).each_with_index do |(ride, _), i|
-          ride.update!(driver_ride_id: car.id, status: 'assigned',
-                       pickup_position: car.passengers.size + i)
-          walked += 1
+        position = stops_of(car).size
+        candidates.sort_by { |_, meters| meters }.each do |ride, _|
+          need = party(ride)
+          next if need > free
+
+          ride.update!(driver_ride_id: car.id, status: 'assigned', pickup_position: position)
+          free -= need
+          position += 1
+          walked += need
         end
       end
       reset_board_state if walked.positive?
@@ -138,7 +143,7 @@ module Rides
     # The pre-pass changed who is seated, so every memoised view of the board
     # is stale.
     def reset_board_state
-      @cars = @pool = @seated = nil
+      @cars = @pool = @seated = @rides_by_id = nil
       @board = RideBoard.new(@event)
     end
 
@@ -146,12 +151,43 @@ module Rides
       @cars ||= @board.cars
     end
 
+    # Plus-ones (issue #22) ride with whoever brought them, so they are never
+    # routed on their own: the host is one stop that needs 1 + guests seats,
+    # and Ride#carry_guests moves them the moment the host is seated. That is
+    # what keeps a group together and a car from being overfilled.
     def pool
-      @pool ||= @board.pool
+      @pool ||= @board.pool.reject { |ride| follower?(ride) }
     end
 
     def seated
-      @seated ||= cars.flat_map { |car| car.passengers.map { |p| [p, car] } }
+      @seated ||= cars.flat_map { |car| stops_of(car).map { |p| [p, car] } }
+    end
+
+    # A car's passengers who are their own stop — not plus-ones riding along.
+    def stops_of(car)
+      car.passengers.reject { |p| follower?(p) }
+    end
+
+    def rides_by_id
+      @rides_by_id ||= @board.rides.index_by(&:id)
+    end
+
+    def follower?(ride)
+      return false unless ride.guest? && ride.host_ride_id
+
+      host = rides_by_id[ride.host_ride_id]
+      host.present? && host.active?
+    end
+
+    # Seats this rider needs: themselves plus anyone they brought.
+    def party(ride)
+      1 + @board.rides.count { |g| g.host_ride_id == ride.id && g.guest? && g.active? }
+    end
+
+    # Seats already taken by a driver's own plus-ones, who are in the car from
+    # the start and so are nobody's stop.
+    def onboard(car)
+      car.passengers.count { |p| follower?(p) && p.host_ride_id == car.id }
     end
 
     def venue_point
@@ -249,12 +285,15 @@ module Rides
       routing.add_dimension(pickup_time, 0, MAX_ROUTE_SECONDS, true, 'pickup')
       routing.mutable_dimension('pickup').set_global_span_cost_coefficient(SPAN_COST)
 
+      parties = routable.map { |i| party(riders[i]) }
       demand = routing.register_unary_transit_callback(
-        ->(index) { manager.index_to_node(index) < rider_count ? 1 : 0 }
+        ->(index) { (node = manager.index_to_node(index)) < rider_count ? parties[node] : 0 }
       )
-      routing.add_dimension_with_vehicle_capacity(
-        demand, 0, driving.map { |car| [car.seats.to_i, car.passengers.size].max }, true, 'seats'
-      )
+      capacities = driving.map do |car|
+        seated_need = stops_of(car).sum { |p| party(p) }
+        [car.seats.to_i - onboard(car), seated_need].max
+      end
+      routing.add_dimension_with_vehicle_capacity(demand, 0, capacities, true, 'seats')
 
       frozen_cars = driving.each_index.select do |v|
         %i[queued sent confirmed].include?(@board.dispatch_status.state_for(driving[v].ride))
@@ -314,7 +353,7 @@ module Rides
     # nobody new only rewrites pickup orders when it found a real improvement,
     # so pressing Auto-fill twice in a row changes nothing.
     def persist(routes, unroutable)
-      newly = routes.sum { |car, order| order.count { |ride| ride.driver_ride_id != car.id } }
+      newly = routes.sum { |car, order| order.select { |ride| ride.driver_ride_id != car.id }.sum { |ride| party(ride) } }
       improvement = previous_cost - proposed_cost(routes)
 
       if newly.zero? && improvement < IMPROVEMENT_FLOOR && !current_routes_overlong?
@@ -345,7 +384,7 @@ module Rides
     # total seconds — and so refused to fix.
     def current_routes_overlong?
       cars.reject { |c| c.ride.meet_at_pickup }.any? do |car|
-        stops = car.passengers.sort_by { |p| [p.pickup_position || 1 << 30, p.display_name.to_s] }
+        stops = stops_of(car).sort_by { |p| [p.pickup_position || 1 << 30, p.display_name.to_s] }
         pickup_phase_seconds(car, stops) > MAX_ROUTE_SECONDS
       end
     end
@@ -368,7 +407,7 @@ module Rides
     # bar a re-solve has to clear before its shuffle is worth anybody's time.
     def previous_cost
       cars.reject { |c| c.ride.meet_at_pickup }.sum do |car|
-        stops = car.passengers.sort_by { |p| [p.pickup_position || 1 << 30, p.display_name.to_s] }
+        stops = stops_of(car).sort_by { |p| [p.pickup_position || 1 << 30, p.display_name.to_s] }
         route_cost(car, stops)
       end
     end

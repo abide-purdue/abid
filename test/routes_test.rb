@@ -1044,6 +1044,60 @@ class RoutesTest < AbidTest
     assert post.reload.update(intro: 'still editable')
   end
 
+  # --- plus-ones (issue #22) -------------------------------------------------
+
+  def test_a_plus_one_can_be_added_from_the_board
+    car = make_driver(@event, 'ian', seats: 4, zone: ZONE_1)
+    host = make_rider(@event, 'anna', zone: ZONE_1, driver: car)
+
+    as_leader
+    post "/board/#{@event.id}/guests", name: 'Visiting Friend', host_ride_id: host.id
+
+    guest = @event.rides.find_by(guest_name: 'Visiting Friend')
+    refute_nil guest, 'no plus-one created'
+    assert_equal host.id, guest.host_ride_id
+    assert_equal car.id, guest.driver_ride_id
+
+    body = get_ok("/board?event_id=#{@event.id}").body
+    assert_includes body, 'Visiting Friend'
+    assert_includes body, '+1 · anna'
+  end
+
+  def test_a_plus_one_needs_a_name_and_a_host
+    host = make_rider(@event, 'anna', zone: ZONE_1)
+
+    as_leader
+    post "/board/#{@event.id}/guests", name: '', host_ride_id: host.id
+    assert_equal 422, last_response.status
+
+    as_leader
+    post "/board/#{@event.id}/guests", name: 'Someone'
+    assert_equal 422, last_response.status
+  end
+
+  def test_the_roster_tab_offers_add_a_plus_one
+    make_rider(@event, 'anna', zone: ZONE_1)
+
+    body = get_ok("/board?event_id=#{@event.id}&tab=roster").body
+
+    assert_includes body, 'Add a plus-one'
+    assert_includes body, "/board/#{@event.id}/guests"
+  end
+
+  def test_a_plus_ones_details_edit_their_name
+    host = make_rider(@event, 'anna', zone: ZONE_1)
+    guest = RideDetails.create_guest(@event, host_ride_id: host.id, name: 'Visting Frend')
+
+    body = get_ok("/board?event_id=#{@event.id}&focus=#{guest.id}").body
+    assert_includes body, 'Plus-one of anna'
+
+    as_leader
+    patch "/board/#{@event.id}/rides/#{guest.id}", name: 'Visiting Friend'
+    assert_equal 'Visiting Friend', guest.reload.guest_name
+    assert_equal host.id, guest.host_ride_id, 'saving the form severed the link'
+    assert_nil guest.pickup_address, "copied the host's pickup onto the guest"
+  end
+
   # --- the emoji catalogue --------------------------------------------------
 
   def test_the_catalogue_covers_the_whole_unicode_set

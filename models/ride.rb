@@ -11,8 +11,16 @@ class Ride < ApplicationRecord
   OUT_STATUSES = %w[cancelled no_show].freeze
 
   belongs_to :event
-  belongs_to :user
+  # Optional for plus-ones (issue #22): people who are not in the Discord,
+  # known only by the name the coordinator typed.
+  belongs_to :user, optional: true
   belongs_to :pickup_location, class_name: 'Location', optional: true
+
+  # Whoever brought this plus-one. Same car, same pickup: the guest follows the
+  # host wherever the host is seated (see carry_guests), and has no pickup of
+  # their own unless one is typed in.
+  belongs_to :host_ride, class_name: 'Ride', optional: true
+  has_many :guests, class_name: 'Ride', foreign_key: :host_ride_id
 
   # A rider points at the driver's ride row for this same event, so a driver's
   # passenger list is scoped to one occurrence instead of being a permanent
@@ -41,6 +49,10 @@ class Ride < ApplicationRecord
   # driving has not told us anything about whether their passengers still need
   # a lift — they do, and they are now the most urgent people on the board.
   before_destroy :unseat_passengers
+  # Seat changes and comings-and-goings of a host carry their plus-ones along.
+  after_update :carry_guests, if: lambda {
+    saved_change_to_driver_ride_id? || saved_change_to_pickup_position? || saved_change_to_status?
+  }
 
   validates :role, inclusion: { in: ROLES }
   validates :status, inclusion: { in: STATUSES }
@@ -49,7 +61,9 @@ class Ride < ApplicationRecord
   # value here overrides good data — but an unconditional validation would let
   # one legacy row roll back a whole AutoFiller transaction.
   validates :zone, inclusion: { in: Location::ZONES }, allow_blank: true, if: :zone_changed?
-  validates :user_id, uniqueness: { scope: :event_id }
+  validates :user_id, uniqueness: { scope: :event_id }, allow_nil: true
+  validates :guest_name, presence: true, if: -> { user_id.nil? }
+  validate :host_must_be_a_rider_on_this_event, if: :host_ride_id_changed?
   validate :driver_ride_must_be_a_driver
   validate :driver_ride_must_be_same_event
 
@@ -62,6 +76,8 @@ class Ride < ApplicationRecord
   scope :in_zone, ->(zone) { where(zone: zone) }
   scope :from_discord, -> { where(source: 'discord') }
   scope :dropped, -> { where.not(dropped_at: nil) }
+  scope :guests, -> { where(user_id: nil) }
+  scope :members, -> { where.not(user_id: nil) }
 
   def rider?
     role == 'rider'
@@ -93,7 +109,18 @@ class Ride < ApplicationRecord
   # the person's two addresses to use, falling back to home when they never
   # told us where their Friday class is.
   def pickup
-    pickup_location || user_pickup
+    pickup_location || (guest? ? host_ride&.pickup : user_pickup)
+  end
+
+  # Someone who is not in the Discord: no account, no DMs, no reactions.
+  def guest?
+    user_id.nil?
+  end
+
+  # A plus-one riding along with their host rather than placed on their own.
+  # An unlinked guest (host gone) is seated like anyone else.
+  def following_host?
+    guest? && host_ride.present? && host_ride.active?
   end
 
   def user_pickup
@@ -119,7 +146,7 @@ class Ride < ApplicationRecord
   # What the details rail shows in the address field: the free text the
   # coordinator typed, falling back to whatever location we have on file.
   def address
-    pickup_address.presence || pickup&.name
+    pickup_address.presence || (guest? ? host_ride&.address : nil) || pickup&.name
   end
 
   # What to put in the driver's Google Maps link for this pickup.
@@ -133,6 +160,7 @@ class Ride < ApplicationRecord
   # not already name one, so "123 Vine St, Lafayette" is not turned into
   # "123 Vine St, Lafayette, West Lafayette, Indiana".
   def pickup_maps_query
+    return host_ride&.pickup_maps_query if pickup_address.blank? && guest? && pickup_location.nil?
     return pickup&.maps_query if pickup_address.blank?
 
     typed = pickup_address.strip
@@ -160,6 +188,8 @@ class Ride < ApplicationRecord
   end
 
   def display_name
+    return guest_name.to_s if guest?
+
     user&.display_name.to_s
   end
 
@@ -167,10 +197,48 @@ class Ride < ApplicationRecord
     "#{user&.name || 'unknown'} (#{role}, #{status})"
   end
 
+  # Where this ride's plus-ones sit: in the host's car — or, when the host is
+  # a driver bringing a friend, in the host's own car.
+  def guest_seat
+    driver? ? id : driver_ride_id
+  end
+
+  # Riding with the driver from the moment the car leaves — not a pickup.
+  def riding_from_the_start?
+    following_host? && host_ride.driver?
+  end
+
   private
 
   def drop_stale_pickup_position
     self.pickup_position = nil
+  end
+
+  # update_all: the guests' own callbacks must not re-fire (they have no
+  # guests), and a seat move should be one statement however many came along.
+  # A host going out takes their plus-ones out too — they came together; a
+  # host coming back brings them back with them.
+  def carry_guests
+    return if guests.empty?
+
+    seat = guest_seat
+    attrs = { driver_ride_id: seat, updated_at: Time.current,
+              # Same stop as the host; none at all when they ride from the start.
+              pickup_position: driver? ? nil : pickup_position }
+    attrs[:status] = if out? then status
+                     elsif seat then 'assigned'
+                     else 'requested'
+                     end
+    guests.update_all(attrs)
+  end
+
+  def host_must_be_a_rider_on_this_event
+    return if host_ride.nil?
+
+    errors.add(:host_ride, 'must be on the same event') unless host_ride.event_id == event_id
+    errors.add(:host_ride, 'is not coming') if host_ride.out?
+    errors.add(:host_ride, 'cannot itself be a plus-one') if host_ride.guest?
+    errors.add(:host_ride, 'cannot be themselves') if host_ride_id == id
   end
 
   # Status first, while the riders are still linked to this car; then the link.

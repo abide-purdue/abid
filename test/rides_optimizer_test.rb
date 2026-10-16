@@ -345,4 +345,37 @@ class RidesOptimizerTest < AbidTest
     riders.each { |r| refute_nil r.reload.driver_ride_id }
   end
 
+
+  # --- plus-ones (issue #22) ----------------------------------------------------
+  #
+  # A host and their plus-ones are one stop needing several seats: never split
+  # across cars, never squeezed into a car without room for all of them.
+
+  def test_a_host_and_plus_one_ride_together_and_need_two_seats
+    one_seat = driver_at('tiny', @near, seats: 1)
+    roomy = driver_at('roomy', @far, seats: 4)
+    host = rider_at('anna', @near)
+    guest = RideDetails.create_guest(@event, host_ride_id: host.id, name: 'Visiting Friend')
+
+    result = optimize(matrix(
+      [@near, @venue] => 300, [@far, @venue] => 300, [@near, @far] => 600
+    ))
+
+    assert_equal 2, result.seated
+    assert_equal roomy.id, host.reload.driver_ride_id, 'a party of two went into a one-seat car'
+    assert_equal roomy.id, guest.reload.driver_ride_id, 'the plus-one was split from the host'
+    assert_equal 0, Ride.where(driver_ride_id: one_seat.id).count
+  end
+
+  def test_a_drivers_own_plus_one_takes_a_seat_before_routing
+    driver = driver_at('ian', @near, seats: 2)
+    RideDetails.create_guest(@event, host_ride_id: driver.id, name: 'Roommate')
+    riders = 2.times.map { |i| rider_at("r#{i}", @near) }
+
+    optimize(matrix([@near, @venue] => 300))
+
+    seated = riders.count { |r| r.reload.driver_ride_id == driver.id }
+    assert_equal 1, seated, 'filled the seat the roommate is already sitting in'
+  end
+
 end

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 4200) do
+ActiveRecord::Schema[8.0].define(version: 4400) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -175,7 +175,7 @@ ActiveRecord::Schema[8.0].define(version: 4200) do
 
   create_table "rides", force: :cascade do |t|
     t.bigint "event_id", null: false
-    t.bigint "user_id", null: false
+    t.bigint "user_id"
     t.string "role", default: "rider", null: false
     t.string "status", default: "requested", null: false
     t.integer "seats"
@@ -191,14 +191,18 @@ ActiveRecord::Schema[8.0].define(version: 4200) do
     t.datetime "dropped_at"
     t.integer "pickup_position"
     t.boolean "meet_at_pickup", default: false, null: false
+    t.string "guest_name"
+    t.bigint "host_ride_id"
     t.index ["driver_ride_id"], name: "index_rides_on_driver_ride_id"
     t.index ["event_id", "role"], name: "index_rides_on_event_id_and_role"
     t.index ["event_id", "source"], name: "index_rides_on_event_id_and_source"
     t.index ["event_id", "user_id"], name: "index_rides_on_event_id_and_user_id", unique: true
     t.index ["event_id"], name: "index_rides_on_event_id"
+    t.index ["host_ride_id"], name: "index_rides_on_host_ride_id"
     t.index ["pickup_location_id"], name: "index_rides_on_pickup_location_id"
     t.index ["user_id"], name: "index_rides_on_user_id"
     t.index ["zone"], name: "index_rides_on_zone"
+    t.check_constraint "user_id IS NOT NULL OR guest_name IS NOT NULL", name: "rides_have_a_person"
   end
 
   create_table "roles", force: :cascade do |t|
@@ -347,6 +351,7 @@ ActiveRecord::Schema[8.0].define(version: 4200) do
   add_foreign_key "rides", "events"
   add_foreign_key "rides", "locations", column: "pickup_location_id"
   add_foreign_key "rides", "rides", column: "driver_ride_id"
+  add_foreign_key "rides", "rides", column: "host_ride_id", on_delete: :nullify
   add_foreign_key "rides", "users"
   add_foreign_key "signup_options", "events"
   add_foreign_key "signup_options", "signup_posts"

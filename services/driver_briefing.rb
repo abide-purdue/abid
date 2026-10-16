@@ -10,7 +10,7 @@ class DriverBriefing
   end
 
   def to_text
-    [headline, seats_line, rider_lines, route_line, notes_line]
+    [headline, seats_line, rider_lines, with_driver_line, route_line, notes_line]
       .compact_blank
       .join("\n\n")
   end
@@ -55,12 +55,23 @@ class DriverBriefing
       name = rider['name'].to_s.split.map(&:capitalize).join(' ')
       bits = ["#{index + 1}. #{name}"]
       bits << "(@#{rider['username']})" if rider['username'].present?
+      # Not in the Discord, no phone on file: the host is how to reach them.
+      bits << "(+1 of #{rider['guest_of'].to_s.split.map(&:capitalize).join(' ')})" if rider['guest_of'].present?
       bits << "— #{rider['pickup']}" if rider['pickup'].present?
       bits << "— #{rider['phone']}" if rider['phone'].present?
       line = bits.join(' ')
       line += "\n   note: #{rider['note']}" if rider['note'].present?
       line
     end.join("\n")
+  end
+
+  # A driver's own plus-ones ride from the start, so they are not a stop —
+  # but they take seats, and the driver should see them counted.
+  def with_driver_line
+    names = @roster['with_driver'].to_a
+    return nil if names.empty?
+
+    "Riding with you from the start: #{names.join(', ')}"
   end
 
   def route_line

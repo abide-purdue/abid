@@ -149,7 +149,9 @@ class RideBoard
   # a seat wasted and a driver told to collect somebody who is not there.
   def elsewhere
     @elsewhere ||= begin
-      ids = rides.select(&:active?).map(&:user_id)
+      # compact: plus-ones have no user, and a nil here would match every other
+      # plus-one on the day.
+      ids = rides.select(&:active?).filter_map(&:user_id)
       if ids.empty? || service_date.nil?
         {}
       else
@@ -168,6 +170,8 @@ class RideBoard
   end
 
   def elsewhere_for(ride)
+    return nil if ride.user_id.nil?
+
     elsewhere[ride.user_id]
   end
 

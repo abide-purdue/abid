@@ -104,6 +104,8 @@ class DispatchPlanner
       },
       # Ordered by the plan, so the DM lists people in pickup order.
       'riders' => plan.pickups.map { |stop| rider_entry(car, stop) },
+      # A driver's own plus-ones: in the car from the start, so not a stop.
+      'with_driver' => car.passengers.select(&:riding_from_the_start?).map(&:display_name),
       'maps_url' => plan.maps_url,
       'truncated' => plan.truncated
     }
@@ -123,7 +125,9 @@ class DispatchPlanner
       'pickup' => stop.label,
       'zone' => ride&.zone,
       'phone' => ride&.user&.phone,
-      'note' => ride&.note
+      'note' => ride&.note,
+      # A plus-one has no Discord and no phone on file: say who to ask.
+      'guest_of' => (ride.host_ride&.display_name if ride&.guest?)
     }
   end
 end

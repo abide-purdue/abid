@@ -27,6 +27,17 @@ module BoardHelpers
   # because the dispatch-bar summary at the bottom is exactly the thing you do
   # not read while dragging riders around. Symbol plus tooltip, never colour
   # alone.
+  # "+1 · Anna": this person is not in the Discord and rides with Anna.
+  def guest_badge(ride)
+    return unless ride.guest?
+
+    host = ride.host_ride&.display_name
+    span(
+      title: host ? "Plus-one of #{host} — not in the Discord; rides in #{host}'s car" : 'Plus-one — not in the Discord',
+      class: 'font-mono text-[10px] font-bold text-accent bg-accent-tint rounded-[4px] px-[4px] py-[1px] flex-none'
+    ) { host ? "+1 · #{host}" : '+1' }
+  end
+
   def elsewhere_badge(ride)
     labels = @board.elsewhere_for(ride)
     return if labels.blank?

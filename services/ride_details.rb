@@ -46,9 +46,29 @@ class RideDetails
     )
   end
 
+  # A plus-one (issue #22): someone not in the Discord, riding with whoever
+  # brought them. Seated straight into the host's car if the host already has
+  # one — or into the host's own car when the host is driving.
+  def self.create_guest(event, host_ride_id:, name:)
+    host = event.rides.find(host_ride_id)
+    guest = event.rides.create!(
+      guest_name: name.to_s.strip, host_ride: host, role: 'rider',
+      status: 'requested', source: 'manual', signed_up_at: Time.zone.now
+    )
+    seat = host.guest_seat
+    guest.update!(driver_ride_id: seat, status: 'assigned') if seat && host.active?
+    guest
+  end
+
   private
 
   def update_user(params)
+    # A plus-one's name lives on the ride; there is no user to update.
+    if @ride.guest?
+      @ride.update!(guest_name: params['name'].strip) if params['name'].present?
+      return
+    end
+
     user = @ride.user
     return if user.nil?
 
@@ -63,6 +83,10 @@ class RideDetails
 
   def update_ride(params)
     attrs = params.slice(*RIDE_FIELDS)
+    if @ride.guest?
+      attrs.delete('role') # a plus-one has no seats to drive
+      attrs.delete('seats')
+    end
     attrs['seats'] = normalize_seats(attrs['seats']) if attrs.key?('seats')
     attrs['zone'] = attrs['zone'].presence if attrs.key?('zone')
     # Dropped rather than passed through: `update!` raises on an invalid role,

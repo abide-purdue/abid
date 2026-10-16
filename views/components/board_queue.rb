@@ -85,6 +85,7 @@ class Components::BoardQueue < Phlex::HTML
         span(class: 'font-semibold text-[12.5px] capitalize flex items-center gap-1.5') do
           plain rider.display_name
           elsewhere_badge(rider)
+          guest_badge(rider)
         end
         if rider.address.present?
           span(class: 'text-[10.5px] opacity-[.78] whitespace-nowrap overflow-hidden text-ellipsis') { rider.address }
